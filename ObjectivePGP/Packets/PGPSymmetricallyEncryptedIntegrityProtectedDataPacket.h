@@ -20,6 +20,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)encrypt:(NSData *)literalPacketData symmetricAlgorithm:(PGPSymmetricAlgorithm)sessionKeyAlgorithm sessionKeyData:(NSData *)sessionKeyData error:(NSError * __autoreleasing *)error;
 - (NSArray<PGPPacket *> *)decryptWithSessionKeyAlgorithm:(PGPSymmetricAlgorithm)sessionKeyAlgorithm sessionKeyData:(NSData *)sessionKeyData error:(NSError * __autoreleasing _Nullable *)error;
 
+- (BOOL)encryptFile:(NSURL *)literalPacketFile
+     destinationURL:(NSURL *)destinationURL
+ symmetricAlgorithm:(PGPSymmetricAlgorithm)sessionKeyAlgorithm
+     sessionKeyData:(NSData *)sessionKeyData
+              error:(NSError * __autoreleasing *)error;
+- (BOOL)exportToFile:(NSURL *)fileURL;
 @end
 
 NS_ASSUME_NONNULL_END

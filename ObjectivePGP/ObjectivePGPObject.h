@@ -99,6 +99,7 @@ NS_ASSUME_NONNULL_BEGIN
  */
 + (nullable NSData *)encrypt:(NSData *)data addSignature:(BOOL)sign usingKeys:(NSArray<PGPKey *> *)keys passphraseForKey:(nullable NSString * _Nullable(^NS_NOESCAPE)(PGPKey *key))passphraseBlock error:(NSError * __autoreleasing _Nullable *)error;
 
++ (nullable NSURL *)encryptFile:(NSURL *)fileURL destinationURL:(NSURL *)destinationURL usingKeys:(NSArray<PGPKey *> *)keys passphraseForKey:(nullable NSString * _Nullable(^NS_NOESCAPE)(PGPKey *key))passphraseBlock error:(NSError * __autoreleasing _Nullable *)error;
 /**
  Decrypt PGP encrypted data.
 

@@ -338,6 +338,125 @@ NS_ASSUME_NONNULL_BEGIN
     return encryptedMessage;
 }
 
++(nullable NSURL*)encryptFile:(NSURL *)fileURL destinationURL:(NSURL *)destinationURL usingKeys:(NSArray<PGPKey *> *)keys passphraseForKey:(nullable NSString * _Nullable(^NS_NOESCAPE)(PGPKey *key))passphraseForKeyBlock error:(NSError * __autoreleasing _Nullable *)error {
+    let publicPartialKeys = [NSMutableArray<PGPPartialKey *> array];
+    for (PGPKey *key in keys) {
+        [publicPartialKeys pgp_addObject:key.publicKey];
+    }
+
+    let encryptedMessage = [NSMutableData data];
+    // PGPPublicKeyEncryptedSessionKeyPacket goes here
+    let preferredSymmeticAlgorithm = [PGPPartialKey preferredSymmetricAlgorithmForKeys:publicPartialKeys];
+
+    // Random bytes as a string to be used as a key
+    NSUInteger keySize = [PGPCryptoUtils keySizeOfSymmetricAlgorithm:preferredSymmeticAlgorithm];
+    let sessionKeyData = [PGPCryptoUtils randomData:keySize];
+
+    for (PGPPartialKey *publicPartialKey in publicPartialKeys) {
+        // Encrypted Message :- Encrypted Data | ESK Sequence, Encrypted Data.
+        // Encrypted Data :- Symmetrically Encrypted Data Packet | Symmetrically Encrypted Integrity Protected Data Packet
+        // ESK :- Public-Key Encrypted Session Key Packet | Symmetric-Key Encrypted Session Key Packet.
+
+        // ESK
+        let encryptionKeyPacket = PGPCast([publicPartialKey encryptionKeyPacket:error], PGPPublicKeyPacket);
+        if (!encryptionKeyPacket) {
+            continue;
+        }
+
+        let pkESKeyPacket = [[PGPPublicKeyEncryptedSessionKeyPacket alloc] init];
+        pkESKeyPacket.keyID = encryptionKeyPacket.keyID;
+        pkESKeyPacket.publicKeyAlgorithm = encryptionKeyPacket.publicKeyAlgorithm;
+        BOOL encrypted = [pkESKeyPacket encrypt:encryptionKeyPacket sessionKeyData:sessionKeyData sessionKeyAlgorithm:preferredSymmeticAlgorithm error:error];
+        if (!encrypted || (error && *error)) {
+            PGPLogDebug(@"Failed encrypt Symmetric-key Encrypted Session Key packet. Error: %@", error ? *error : @"Unknown");
+            return nil;
+        }
+        [encryptedMessage pgp_appendData:[pkESKeyPacket export:error]];
+        if (error && *error) {
+            PGPLogDebug(@"Missing literal data. Error: %@", error ? *error : @"Unknown");
+            return nil;
+        }
+
+        // TODO: find the compression type most common to the used keys
+    }
+    
+    let literalPacket = [PGPLiteralPacket literalPacket:PGPLiteralPacketBinary withFileURL:fileURL];
+    literalPacket.filename = nil;
+    literalPacket.timestamp = NSDate.date;
+    let literalPacketFile = [literalPacket exportFile:error];
+    if (error && *error) {
+        PGPLogDebug(@"Missing literal packet data. Error: %@", *error);
+        [[NSFileManager defaultManager] removeItemAtPath:literalPacketFile.path error:error];
+        return nil;
+    }
+    /*
+    NSData* originalCompress = [NSData dataWithContentsOfFile:literalPacketFile.path options:NSDataReadingMappedIfSafe | NSDataReadingUncached error:error];
+    let compressedPacket1 = [[PGPCompressedPacket alloc] initWithData:originalCompress type:PGPCompressionZLIB];
+    NSData* compress = [compressedPacket1 export:error];
+    [compress writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"compress-original"] atomically:YES];
+    */
+    // FIXME: do not use hardcoded value for compression type
+    let compressedPacket = [[PGPCompressedPacket alloc] initWithFile:literalPacketFile type:PGPCompressionZLIB];
+    NSURL *compressFileURL = [compressedPacket exportFile:error];
+    if (compressFileURL == nil || (error && *error)) {
+        return nil;
+    }
+    let symEncryptedDataPacket = [[PGPSymmetricallyEncryptedIntegrityProtectedDataPacket alloc] init];
+    [symEncryptedDataPacket encryptFile:compressFileURL destinationURL:destinationURL  symmetricAlgorithm:preferredSymmeticAlgorithm sessionKeyData:sessionKeyData error:error];
+    
+    if (error && *error) {
+        return nil;
+    }
+
+    BOOL isSuccess = [symEncryptedDataPacket exportToFile:destinationURL];
+    [[NSFileManager defaultManager] removeItemAtPath:compressFileURL.path error:error];
+    if (isSuccess) {
+        NSString *fileName = [NSString stringWithFormat:@"post-%@", destinationURL.lastPathComponent];
+        NSString *newFilePath = [NSTemporaryDirectory() stringByAppendingPathComponent:fileName];
+        [[NSFileManager defaultManager] createFileAtPath:newFilePath contents:nil attributes:nil];
+        CFURLRef readFilePathURL = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, (CFStringRef)destinationURL.path, kCFURLPOSIXPathStyle, (Boolean)false);
+        CFReadStreamRef readStream = readFilePathURL ? CFReadStreamCreateWithFile(kCFAllocatorDefault, readFilePathURL) : NULL;
+        BOOL didSucceed = readStream ? (BOOL)CFReadStreamOpen(readStream) : NO;
+        CFURLRef writeFilePathURL = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, (CFStringRef)newFilePath, kCFURLPOSIXPathStyle, (Boolean)false);
+        CFWriteStreamRef writeStream = writeFilePathURL ? CFWriteStreamCreateWithFile(kCFAllocatorDefault, writeFilePathURL) : NULL;
+        BOOL didWriteSucceed = writeStream ? (BOOL)CFWriteStreamOpen(writeStream) : NO;
+        if (didSucceed && didWriteSucceed) {
+            // Use default value for the chunk size for reading data.
+            const size_t chunkSizeForReadingData = 4096;
+            
+            CFWriteStreamWrite(writeStream, encryptedMessage.bytes, encryptedMessage.length);
+            // Feed the data to the hash object.
+            BOOL hasMoreData = YES;
+            while (hasMoreData) {
+                uint8_t buffer[chunkSizeForReadingData];
+                CFIndex readBytesCount = CFReadStreamRead(readStream, (UInt8 *)buffer, (CFIndex)sizeof(buffer));
+                if (readBytesCount == -1) {
+                    break;
+                } else if (readBytesCount == 0) {
+                    hasMoreData = NO;
+                } else {
+                    CFWriteStreamWrite(writeStream, buffer, readBytesCount);
+                }
+            }
+            // Close the read/write stream.
+            CFReadStreamClose(readStream);
+            CFWriteStreamClose(writeStream);
+            // Proceed if the read operation succeeded.
+            didSucceed = !hasMoreData;
+        }
+        if (readStream) CFRelease(readStream);
+        if (readFilePathURL)    CFRelease(readFilePathURL);
+        if (writeStream) CFRelease(writeStream);
+        if (writeFilePathURL)    CFRelease(writeFilePathURL);
+        
+
+        NSURL *newFileURL = [NSURL fileURLWithPath:newFilePath];
+        [[NSFileManager defaultManager] replaceItemAtURL:destinationURL withItemAtURL: newFileURL backupItemName:nil options:0 resultingItemURL:nil error:nil];
+        [[NSFileManager defaultManager] removeItemAtPath:newFilePath error:nil];
+        return destinationURL;
+    }
+    return nil;
+}
 #pragma mark - Sign & Verify
 
 + (nullable NSData *)sign:(NSData *)data detached:(BOOL)detached usingKeys:(NSArray<PGPKey *> *)keys passphraseForKey:(nullable NSString * _Nullable(^NS_NOESCAPE)(PGPKey *key))passphraseBlock error:(NSError * __autoreleasing _Nullable *)error {

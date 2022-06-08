@@ -26,6 +26,13 @@ NS_ASSUME_NONNULL_BEGIN
                               iv:(NSData *)ivData
                          syncCFB:(BOOL)openpgpCFB;
 
++ (BOOL)encryptFileURL:(NSURL *)encryptedFileURL
+        destinationURL:(NSURL *)destinationURL
+            prefixData:(NSData *)prefixData
+        sessionKeyData:(NSData *)sessionKeyData // s2k produceSessionKeyWithPassphrase
+    symmetricAlgorithm:(PGPSymmetricAlgorithm)symmetricAlgorithm
+                    iv:(NSData *)ivData
+               syncCFB:(BOOL)openpgpCFB;
 @end
 
 NS_ASSUME_NONNULL_END

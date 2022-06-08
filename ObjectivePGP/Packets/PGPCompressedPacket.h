@@ -16,7 +16,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, readonly) NSData *decompressedData;
 
 - (instancetype)initWithData:(NSData *)data type:(PGPCompressionAlgorithm)type;
-
+- (instancetype)initWithFile:(NSURL *)fileURL type:(PGPCompressionAlgorithm)type;
+- (nullable NSURL *)exportFile:(NSError * __autoreleasing _Nullable *)error;
 @end
 
 NS_ASSUME_NONNULL_END

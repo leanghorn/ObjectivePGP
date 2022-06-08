@@ -25,7 +25,8 @@ extern const UInt32 PGPUnknownLength;
 - (NSUInteger)parsePacketBody:(NSData *)packetBody error:(NSError * __autoreleasing _Nullable *)error;
 
 + (NSData *)buildPacketOfType:(PGPPacketTag)tag withBody:(NS_NOESCAPE NSData *(^)(void))body;
-
+//+ (BOOL)buildPacketOfType:(PGPPacketTag)tag withFile:(NS_NOESCAPE NSURL *(^)(void))file;
++ (BOOL)buildPacketOfType:(PGPPacketTag)tag withData:(nullable NSData*)data file:(NSURL *(^)(void))file;
 - (id)copyWithZone:(nullable NSZone *)zone NS_REQUIRES_SUPER;
 
 @end

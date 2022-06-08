@@ -24,10 +24,11 @@ typedef NS_ENUM(UInt8, PGPLiteralPacketFormat) {
 @property (nonatomic, copy, nullable) NSString *filename;
 
 @property (nonatomic, copy) NSData *literalRawData;
-
+@property (nonatomic, copy) NSURL *fileURL;
 - (instancetype)initWithData:(NSData *)rawData;
 + (PGPLiteralPacket *)literalPacket:(PGPLiteralPacketFormat)format withData:(NSData *)rawData;
-
++ (PGPLiteralPacket *)literalPacket:(PGPLiteralPacketFormat)format withFileURL:(NSURL *)fileURL;
+- (nullable NSURL *)exportFile:(NSError * __autoreleasing _Nullable *)error;
 @end
 
 NS_ASSUME_NONNULL_END

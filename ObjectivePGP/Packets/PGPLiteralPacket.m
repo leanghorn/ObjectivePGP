@@ -32,8 +32,21 @@ NS_ASSUME_NONNULL_BEGIN
     return self;
 }
 
+- (instancetype)initWithFileURL:(NSURL *)fileURL {
+    if (self = [self init]) {
+        _fileURL = fileURL;
+    }
+    return self;
+}
+
 + (PGPLiteralPacket *)literalPacket:(PGPLiteralPacketFormat)format withData:(NSData *)rawData {
     let literalPacket = [[PGPLiteralPacket alloc] initWithData:rawData];
+    literalPacket.format = format;
+    return literalPacket;
+}
+
++ (PGPLiteralPacket *)literalPacket:(PGPLiteralPacketFormat)format withFileURL:(NSURL *)fileURL {
+    let literalPacket = [[PGPLiteralPacket alloc] initWithFileURL:fileURL];
     literalPacket.format = format;
     return literalPacket;
 }
@@ -139,6 +152,35 @@ NS_ASSUME_NONNULL_BEGIN
     }
 }
 
+- (nullable NSURL *)exportFile:(NSError * __autoreleasing _Nullable *)error {
+    @autoreleasepool {
+        NSString *fileName = [NSString stringWithFormat:@"tmp-encrytped-%@", self.fileURL.lastPathComponent];
+        NSString *newFilePath = [NSTemporaryDirectory() stringByAppendingPathComponent:fileName];
+        NSURL *newFileURL = [NSURL fileURLWithPath:newFilePath];
+        [[NSFileManager defaultManager] copyItemAtPath:self.fileURL.path toPath:newFilePath error:nil];
+        NSMutableData* bodyData = [NSMutableData data];
+        [bodyData appendBytes:&self->_format length:1];
+
+        if (self.filename) {
+            UInt8 filenameLength = (UInt8)[self.filename lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+            [bodyData appendBytes:&filenameLength length:1];
+            [bodyData appendBytes:[self.filename cStringUsingEncoding:NSUTF8StringEncoding] length:filenameLength];
+        } else {
+            UInt8 zero[1] = {0x00};
+            [bodyData appendBytes:&zero length:1];
+        }
+
+        UInt8 zero4[4] = {0, 0, 0, 0};
+        [bodyData appendBytes:&zero4 length:4];
+        let isSuccess = [PGPPacket buildPacketOfType:self.tag withData:bodyData file:^NSURL * _Nonnull{
+            return newFileURL;
+        }];
+        if (isSuccess) {
+            return newFileURL;
+        }
+        return nil;
+    }
+}
 #pragma mark - isEqual
 
 - (BOOL)isEqual:(id)other {

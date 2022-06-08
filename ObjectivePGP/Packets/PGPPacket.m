@@ -236,6 +236,115 @@ NS_ASSUME_NONNULL_BEGIN
     return data;
 }
 
++ (BOOL)buildPacketOfType:(PGPPacketTag)tag withData:(nullable NSData*)data file:(NSURL *(^)(void))file {
+    return [self buildPacketOfType:tag isOld:NO withData:data file:file];
+}
+
++ (BOOL)buildPacketOfType:(PGPPacketTag)tag isOld:(BOOL)isOld withData:(nullable NSData*)data file:(NSURL *(^)(void))file {
+    // 4.2.2.  New Format Packet Lengths
+    let dataFile = file();
+    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:dataFile.path error:NULL];
+    unsigned long long fileSize = [attributes fileSize];
+    UInt8 packetTag = 0;
+
+    // Bit 7 -- Always one
+    packetTag |= PGPHeaderPacketTagAllwaysSet;
+
+    // Bit 6 -- New packet format if set
+    if (!isOld) {
+        packetTag |= PGPHeaderPacketTagNewFormat;
+    }
+
+    if (isOld) {
+        // Bits 5-2 -- packet tag
+        packetTag |= (tag << 4) >> 2;
+
+        // Bits 1-0 -- length-type
+        UInt64 bodyLength = (UInt64)fileSize;
+        if (bodyLength < 0xFF) {
+            // 0 - The packet has a one-octet length.  The header is 2 octets long.
+            packetTag |= 0;
+        } else if (bodyLength <= 0xFFFF) {
+            // 1 - The packet has a two-octet length.  The header is 3 octets long.
+            packetTag |= 1;
+        } else if (bodyLength <= 0xFFFFFFFF) {
+            // 2 - The packet has a four-octet length.  The header is 5 octets long.
+            packetTag |= 2;
+        } else {
+            // 3 - The packet is of indeterminate length.
+            // In general, an implementation SHOULD NOT use indeterminate-length packets except where the end of the data will be clear from the context
+            packetTag |= 3;
+            NSAssert(NO, @"In general, an implementation SHOULD NOT use indeterminate-length packets");
+        }
+    } else {
+        // Bits 5-0 -- packet tag
+        packetTag |= tag;
+    }
+
+    // write ptag
+    if (data) {
+        fileSize += data.length;
+    }
+    NSData *dataFileSize;
+    // write header
+    if (isOld) {
+        dataFileSize = [PGPPacketHeader buildOldFormatLengthDataForDataLength:fileSize];
+    } else {
+        dataFileSize = [PGPPacketHeader buildNewFormatLengthDataForDataLength:fileSize];
+    }
+    //NSString *fileName = [NSString stringWithFormat:@"pre-%@", dataFile.lastPathComponent];
+    NSString *fileName = [NSString stringWithFormat:@"pre-%llu", fileSize];
+    NSString *newFilePath = [NSTemporaryDirectory() stringByAppendingPathComponent:fileName];
+    [[NSFileManager defaultManager] createFileAtPath:newFilePath contents:nil attributes:nil];
+    CFURLRef readFilePathURL = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, (CFStringRef)dataFile.path, kCFURLPOSIXPathStyle, (Boolean)false);
+    CFReadStreamRef readStream = readFilePathURL ? CFReadStreamCreateWithFile(kCFAllocatorDefault, readFilePathURL) : NULL;
+    BOOL didSucceed = readStream ? (BOOL)CFReadStreamOpen(readStream) : NO;
+    CFURLRef writeFilePathURL = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, (CFStringRef)newFilePath, kCFURLPOSIXPathStyle, (Boolean)false);
+    CFWriteStreamRef writeStream = writeFilePathURL ? CFWriteStreamCreateWithFile(kCFAllocatorDefault, writeFilePathURL) : NULL;
+    BOOL didWriteSucceed = writeStream ? (BOOL)CFWriteStreamOpen(writeStream) : NO;
+    if (didSucceed && didWriteSucceed) {
+        // Use default value for the chunk size for reading data.
+        const size_t chunkSizeForReadingData = 4096;
+        // Feed the data to the hash object.
+        BOOL hasMoreData = YES;
+        // write header
+        let headerData = [NSMutableData data];
+        [headerData appendBytes:&packetTag length:1];
+        [headerData appendData:dataFileSize];
+        if (data) {
+            [headerData appendData:data];
+        }
+        CFWriteStreamWrite(writeStream, headerData.bytes, headerData.length);
+        while (hasMoreData) {
+            uint8_t buffer[chunkSizeForReadingData];
+            CFIndex readBytesCount = CFReadStreamRead(readStream, (UInt8 *)buffer, (CFIndex)sizeof(buffer));
+            if (readBytesCount == -1) {
+                break;
+            } else if (readBytesCount == 0) {
+                hasMoreData = NO;
+            } else {
+                CFWriteStreamWrite(writeStream, buffer, readBytesCount);
+            }
+        }
+        // Close the read/write stream.
+        CFReadStreamClose(readStream);
+        CFWriteStreamClose(writeStream);
+        // Proceed if the read operation succeeded.
+        didSucceed = !hasMoreData;
+    }
+    if (readStream) CFRelease(readStream);
+    if (readFilePathURL)    CFRelease(readFilePathURL);
+    if (writeStream) CFRelease(writeStream);
+    if (writeFilePathURL)    CFRelease(writeFilePathURL);
+    
+    //NSURL *newFileURL = [NSURL fileURLWithPath:newFilePath];
+    [[NSFileManager defaultManager] removeItemAtPath:dataFile.path error:nil];
+    [[NSFileManager defaultManager] copyItemAtPath:newFilePath toPath:dataFile.path error:nil];
+//    [[NSFileManager defaultManager] replaceItemAtURL:dataFile withItemAtURL: newFileURL backupItemName:nil options:0 resultingItemURL:nil error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:newFilePath error:nil];
+    return YES;
+}
+
 #pragma mark - NSCopying
 
 - (id)copyWithZone:(nullable NSZone *)zone {

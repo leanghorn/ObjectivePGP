@@ -15,7 +15,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, readonly) NSData *hashData;
 
 - (instancetype)initWithData:(NSData *)data;
-
+- (instancetype)initWithFile:(NSURL *)fileURL prefix: (NSData *)prefixdata surfix: (NSData *) surfix;
 @end
 
 NS_ASSUME_NONNULL_END

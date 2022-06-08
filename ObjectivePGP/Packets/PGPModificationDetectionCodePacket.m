@@ -32,6 +32,47 @@ NS_ASSUME_NONNULL_BEGIN
     return self;
 }
 
+- (instancetype)initWithFile:(NSURL *)fileURL prefix: (NSData *)prefixdata surfix: (NSData *) surfix {
+    if (self = [self init]) {
+        CFURLRef filePathURL = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, (CFStringRef)fileURL.path, kCFURLPOSIXPathStyle, (Boolean)false);
+        CFReadStreamRef readStream = filePathURL ? CFReadStreamCreateWithFile(kCFAllocatorDefault, filePathURL) : NULL;
+        BOOL didSucceed = readStream ? (BOOL)CFReadStreamOpen(readStream) : NO;
+        if (didSucceed) {
+            
+            // Use default value for the chunk size for reading data.
+            const size_t chunkSizeForReadingData = 4096;
+            
+            // Initialize the hash object
+            CC_SHA1_CTX context;
+            CC_SHA1_Init(&context);
+            CC_SHA1_Update(&context, prefixdata.bytes, (CC_LONG)prefixdata.length);
+            // Feed the data to the hash object.
+            BOOL hasMoreData = YES;
+            while (hasMoreData) {
+                uint8_t buffer[chunkSizeForReadingData];
+                CFIndex readBytesCount = CFReadStreamRead(readStream, (UInt8 *)buffer, (CFIndex)sizeof(buffer));
+                if (readBytesCount == -1) {
+                    break;
+                } else if (readBytesCount == 0) {
+                    hasMoreData = NO;
+                } else {
+                    CC_SHA1_Update(&context, buffer, (CC_LONG)readBytesCount);
+                }
+            }
+            CC_SHA1_Update(&context, surfix.bytes, (CC_LONG)surfix.length);
+            // Compute the hash digest
+            unsigned char digest[CC_SHA1_DIGEST_LENGTH];
+            CC_SHA1_Final(digest, &context);
+            // Close the read stream.
+            CFReadStreamClose(readStream);
+            let outData = [NSData dataWithBytes:digest length:CC_SHA1_DIGEST_LENGTH];
+            self->_hashData = outData;
+        }
+        if (readStream) CFRelease(readStream);
+        if (filePathURL)    CFRelease(filePathURL);
+    }
+    return self;
+}
 - (PGPPacketTag)tag {
     return PGPModificationDetectionCodePacketTag; // 19
 }
